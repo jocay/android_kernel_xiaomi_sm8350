@@ -48,7 +48,7 @@ sudo apt install -y \
 ## 二、工具链准备
 
 Android 16 (LineageOS 23.2) 的内核构建采用了高版本的 Clang 以及 Android Boot Header v3 引导结构。
-为保证编译出的内核与系统驱动（vendor modules）完美兼容，需要以下工具支持（默认建议存放于 `~/android/buildtools`）：
+为保证编译出的内核与系统驱动（vendor modules）完美兼容，需要以下工具支持（默认建议存放于 `~/android/tools`）：
 
 ### 1. 编译器版本详细信息与下载链接
 
@@ -64,8 +64,8 @@ Android 16 (LineageOS 23.2) 的内核构建采用了高版本的 Clang 以及 An
 
 #### 下载并解压命令：
 ```bash
-mkdir -p ~/android/buildtools/clang-r563880c
-curl -L "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-16.0.0_r4/clang-r563880c.tar.gz" | tar -xz -C ~/android/buildtools/clang-r563880c
+mkdir -p ~/android/tools/toolchains/clang-r563880c
+curl -L "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-16.0.0_r4/clang-r563880c.tar.gz" | tar -xz -C ~/android/tools/toolchains/clang-r563880c
 ```
 
 > **补充说明（备用工具链）**：  
@@ -79,13 +79,13 @@ curl -L "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x8
 
 ```bash
 # 下载 mkbootimg (用于打包 Android boot 镜像)
-git clone --depth 1 -b lineage-22.1 https://github.com/LineageOS/android_system_tools_mkbootimg ~/android/buildtools/mkbootimg
+git clone --depth 1 -b lineage-22.1 https://github.com/LineageOS/android_system_tools_mkbootimg ~/android/tools/boot/mkbootimg
 
 # 下载 avbtool (用于计算并追加 AVB Hash Footer)
-git clone --depth 1 -b lineage-22.1 https://github.com/LineageOS/android_external_avb ~/android/buildtools/avb
+git clone --depth 1 -b lineage-22.1 https://github.com/LineageOS/android_external_avb ~/android/tools/boot/avb
 ```
 
-> **提示**：如果使用自带的 `./build_boot.sh` 脚本，若检测到工具链目录不存在，脚本会自动下载配置，无需手动逐个操作。
+> **提示**：如果使用自带的 `./build_boot.sh` 脚本，工具缺失时脚本会自动从 AOSP（`android-16.0.0_r4`）下载这三样工具，无需手动逐个操作。
 
 ---
 
@@ -94,24 +94,29 @@ git clone --depth 1 -b lineage-22.1 https://github.com/LineageOS/android_externa
 在其他机器上拉取本源码后，如果只想直接编译出一个无改动或已修改好的可开机 `boot.img`：
 
 1. **准备官方参考镜像**：
-   下载最新的 LineageOS 23.2 官方 `boot.img`（用于提取官方 ramdisk 和引导签名元数据），放入源码上级目录的 `images` 文件夹中（即 `../images/boot.img`），或者通过环境变量指定：
+   把与手机当前系统同一版本的 LineageOS 23.2 官方 `boot.img` 和 `vendor_boot.img` 放入源码上级目录的 `images` 文件夹中（即 `../images/`），或者通过环境变量指定：
    ```bash
    export IMAGES_DIR=/path/to/official/images
    ```
+   `boot.img` 必需（提供内核配置、ramdisk 和引导签名元数据）；`vendor_boot.img` 可选，有它才能做模块 ABI 检查。
 
 2. **执行一键构建脚本**：
    ```bash
-   chmod +x build_boot.sh
    ./build_boot.sh
    ```
 
 脚本执行流程：
-- 自动校验主机环境与工具链（缺失则自动下载）。
-- 合并小米 11 Venus 专属的 defconfig。
-- 使用 Clang 并行编译内核目标 `Image`。
-- 自动提取官方 ramdisk，使用 `mkbootimg` 进行打包。
-- 使用 `avbtool` 注入 AVB Hash Footer 签名。
-- 产物输出至：`out/boot.img`（大小严格对齐 192MB / 201,326,592 字节）。
+- 校验主机环境；工具缺失时自动下载到 `~/android/tools`（可用 `TOOLS=` 指定）。
+- 从官方 `boot.img` 读取内核配置（`CONFIG_IKCONFIG`）、ramdisk、OS 版本、补丁级别和 AVB 指纹，每次运行都重新读取。
+- 以官方配置为基础，合并 `EXTRA_CONFIGS` 指定的配置片段，每次运行都重新生成 `.config`。
+- 把版本后缀固定为官方内核的 `-g7ede20c8692e`（写入 `.scmversion`），编译 `Image`。
+- 校验版本串与官方一致，并核对官方 `vendor_boot` 模块依赖的每个符号 CRC。任一不符即中止，不产出镜像。
+- 用 `mkbootimg` 打包并用 `avbtool` 追加 AVB Hash Footer，输出 `out/boot.img`（大小等于官方 `boot.img`）。
+
+`vendor_boot` 之外的模块（WiFi、相机等位于 vendor 分区）不在上述检查范围内。要覆盖它们，先用未改动的源码生成一份全量基线，之后每次编译都会与它比对：
+```bash
+EXTRA_CONFIGS= SAVE_ABI_BASELINE=1 ./build_boot.sh
+```
 
 ---
 
@@ -121,7 +126,7 @@ git clone --depth 1 -b lineage-22.1 https://github.com/LineageOS/android_externa
 
 ### 1. 配置环境变量
 ```bash
-export PATH=~/android/buildtools/clang-r563880c/bin:$PATH
+export PATH=~/android/tools/toolchains/clang-r563880c/bin:$PATH
 export ARCH=arm64
 export SUBARCH=arm64
 export CC=clang
@@ -158,7 +163,7 @@ make -j$(nproc) O=out/kernel_obj Image
 ### 4. 解包官方 boot.img 提取 Ramdisk
 ```bash
 mkdir -p out/official_boot_unpacked
-python3 ~/android/buildtools/mkbootimg/unpack_bootimg.py \
+python3 ~/android/tools/boot/mkbootimg/unpack_bootimg.py \
     --boot_img /path/to/official/boot.img \
     --out out/official_boot_unpacked
 ```
@@ -166,7 +171,7 @@ python3 ~/android/buildtools/mkbootimg/unpack_bootimg.py \
 ### 5. 打包新 boot.img 并签署 AVB Footer
 ```bash
 # 1. 打包 boot.img (Header Version 3)
-python3 ~/android/buildtools/mkbootimg/mkbootimg.py \
+python3 ~/android/tools/boot/mkbootimg/mkbootimg.py \
     --header_version 3 \
     --kernel out/kernel_obj/arch/arm64/boot/Image \
     --ramdisk out/official_boot_unpacked/ramdisk \
@@ -176,7 +181,7 @@ python3 ~/android/buildtools/mkbootimg/mkbootimg.py \
     -o out/boot.img
 
 # 2. 追加 AVB Hash Footer (保证 Bootloader 校验通过)
-python3 ~/android/buildtools/avb/avbtool.py add_hash_footer \
+python3 ~/android/tools/boot/avb/avbtool.py add_hash_footer \
     --image out/boot.img \
     --partition_size 201326592 \
     --partition_name boot \
@@ -208,12 +213,19 @@ fastboot reboot
 
 ## 六、核心注意事项与避坑指南（重要！）
 
-### 1. 严防内核版本出现 `-dirty` 后缀（导致卡开机、触屏或WiFi失效）
-- **原因**：Linux 内核默认开启了 `CONFIG_LOCALVERSION_AUTO=y`。编译时脚本会检查当前 Git 仓库。若存在未提交的修改或未追踪的新增文件，内核版本会自动由 `5.4.302-qgki-g7ede20c8692e` 变为 `5.4.302-qgki-g7ede20c8692e-dirty`。
-- **后果**：小米 11 采用 Android 11+ GKI / QGKI 架构，触摸屏、DRM 显示、WiFi 等核心驱动以 `.ko` 模块形式存放在 `vendor_boot` 分区。一旦主内核版本带上 `-dirty`，内核加载模块时检查 **vermagic** 会判断版本不匹配而**拒绝加载驱动**，导致开机触屏失灵甚至卡米！
+### 1. 内核版本串必须与官方完全一致（否则卡开机、触屏或WiFi失效）
+- **原因**：Linux 内核默认开启了 `CONFIG_LOCALVERSION_AUTO=y`，版本串末尾是当前 Git 提交号。官方内核是 `5.4.302-qgki-g7ede20c8692e`；本仓库的任何提交都不是 `7ede20c8692e`，有未提交改动时还会再多一个 `-dirty`。
+- **后果**：小米 11 采用 Android 11+ GKI / QGKI 架构，触摸屏、DRM 显示、WiFi 等核心驱动以 `.ko` 模块形式存放在 `vendor_boot` 等分区。版本串不同，内核加载模块时检查 **vermagic** 会**拒绝加载驱动**，导致开机触屏失灵甚至卡米！
 - **对策**：
-  - 编译前务必确保 `git status` 是干净的（或在 commit 之后再编译）。
-  - 可以检查编译输出的 `out/kernel_obj/include/config/kernel.release`，确保里面**没有** `-dirty` 后缀。
+  - 在源码根目录写入 `.scmversion`（已被 `.gitignore` 忽略），内核会直接采用它而不再读取 Git 状态。`build_boot.sh` 会自动写入：
+    ```bash
+    echo "-g7ede20c8692e" > .scmversion
+    ```
+  - 检查 `out/kernel_obj/include/config/kernel.release`，应当正好是 `5.4.302-qgki-g7ede20c8692e`。
+  - 官方镜像换成基于其他内核提交的版本后，需要同步源码并改用新的后缀（`SCMVERSION=-g<新提交号>`）。
+
+### 1.1 不能改变导出符号的 CRC
+官方内核开启了 `CONFIG_MODVERSIONS`，模块加载时还会逐个核对所用内核符号的 CRC。改动 `task_struct` 等结构体布局、或开启会改变这些结构体的配置项，都会让预编译模块加载失败。`build_boot.sh` 编译后会自动检查。
 
 ### 2. 必须使用同款 `clang-r563880c` 编译器
 LineageOS 23.2（Android 16）官方整机构建使用的平台编译器是 `clang-r563880c`（LLVM 21.0.0）。切勿使用过旧的 Clang 12 或系统自带 GCC 编译，否则可能会遇到编译报错、内联汇编语法差异，或符号表与预编译驱动模块不兼容的问题。
@@ -233,10 +245,9 @@ LineageOS 23.2（Android 16）官方整机构建使用的平台编译器是 `cla
 
 1. **添加驱动或修改配置**：
    - 可以在源码中直接修改代码。
-   - 若要增加模块或配置项，可在 `arch/arm64/configs/vendor/venus_QGKI.config` 中追加 `CONFIG_XXXX=y` 或 `=m`。
-2. **提交与编译流程**：
-   - 修改代码 -> `git add . && git commit -m "feat: your change"` -> 运行 `./build_boot.sh` -> 刷入测试。
-   - 始终保持 Commit 状态进行构建，确保 vermagic 版本号稳定。
+   - 若要增加配置项，新建一个配置片段（如 `arch/arm64/configs/vendor/my.config`），用 `EXTRA_CONFIGS="my.config" ./build_boot.sh` 合入。脚本以官方 `boot.img` 内嵌的配置为基础，直接改 `venus_QGKI.config` 不会生效。
+2. **编译流程**：
+   - 修改代码 -> 运行 `./build_boot.sh` -> 刷入测试。是否已提交不影响版本串。
 
 ---
 
@@ -253,12 +264,11 @@ git submodule update --init
 ```
 
 ### 2. 配置与编译
-在第四节的四个 defconfig 片段之后追加 `arch/arm64/configs/vendor/kernelsu_next.config`（`CONFIG_KSU=y`、`CONFIG_KSU_MANUAL_HOOK=y`）。不追加的话 `CONFIG_KSU` 仍默认开启，但会落到不适用于 5.4 的 kprobes 模式。
-
-本分支的 HEAD 不是官方提交，编译前需固定版本后缀，否则 vermagic 与 `vendor_boot` 中的官方模块不匹配（`build_boot.sh` 目前不会做这两步）：
+直接运行 `./build_boot.sh`。脚本会自动合入 `arch/arm64/configs/vendor/kernelsu_next.config`（`CONFIG_KSU=y`、`CONFIG_KSU_MANUAL_HOOK=y`）。要编译不带 KernelSU 的内核：
 ```bash
-echo "-g7ede20c8692e" > .scmversion
+EXTRA_CONFIGS= ./build_boot.sh
 ```
+手动编译时必须自己合入这个片段：`CONFIG_KSU` 默认开启，不指定 `CONFIG_KSU_MANUAL_HOOK=y` 会落到不适用于 5.4 的 kprobes 模式。
 
 ### 3. 不要给 `struct seccomp` 加字段
 KernelSU 的 Kbuild 会在编译时向 `include/linux/seccomp.h` 的 `struct seccomp` 插入 `atomic_t filter_count;`，这会改变 `task_struct` 布局并破坏官方模块的 ABI。该文件中的注释用于阻止这一行为，请勿删除。
