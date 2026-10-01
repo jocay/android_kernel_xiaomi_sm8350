@@ -251,7 +251,7 @@ LineageOS 23.2（Android 16）官方整机构建使用的平台编译器是 `cla
 
 ---
 
-## 八、KernelSU-Next（本分支 `lineage-23.2-ksu`）
+## 八、KernelSU-Next（分支 `lineage-23.2-ksu`）
 
 本分支在 `lineage-23.2` 基础上内置了 [KernelSU-Next](https://github.com/KernelSU-Next/KernelSU-Next)（legacy 分支，手动挂钩模式）。
 
@@ -275,3 +275,16 @@ KernelSU 的 Kbuild 会在编译时向 `include/linux/seccomp.h` 的 `struct sec
 
 ### 4. 使用
 刷入 `boot.img` 后安装同版本的 KernelSU-Next 管理器。开机时连按三次音量下键进入安全模式（禁用所有模块）。
+
+---
+
+## 九、Droidspaces 容器支持
+
+本分支同时开启了 [Droidspaces](https://github.com/ravindu644/Droidspaces-OSS) 所需的内核特性，按其文档中的 “GKI” 方案集成（本机是 5.4 + 预编译 vendor 模块，适用该方案而非 “non-GKI”）。
+
+- **配置片段**：`arch/arm64/configs/vendor/droidspaces.config`，`build_boot.sh` 会自动合入。主要是 `SYSVIPC`、`POSIX_MQUEUE`、`IPC_NS`、`PID_NS`、`DEVTMPFS`，以及容器内 NAT / UFW / Fail2ban / NixOS 用到的 netfilter 与 tmpfs 选项。
+- **kABI 处理**：`SYSVIPC` 和 `POSIX_MQUEUE` 会分别给 `task_struct`、`user_struct` 增加字段。`include/linux/sched.h` 与 `include/linux/sched/user.h` 把这些字段放进结构体末尾预留的 `ANDROID_KABI_RESERVE` 槽位，原有字段的偏移不变。
+- **不要超出该片段的范围**：例如 `CGROUP_DEVICE`、`CGROUP_PIDS` 会改变 cgroup 相关结构体，破坏官方模块的 ABI。
+- **`CONFIG_USER_NS` 默认未开启**：它能消除容器内 Docker 的 “unsafe procfs” 报错，但会允许所有普通应用创建用户命名空间，Android 内核出于安全考虑一直关闭它。已验证开启后 ABI 不变，需要时取消片段末尾那一行的注释即可。
+
+刷入后安装 Droidspaces 应用并授予 root，在 **设置 -> Requirements -> Check Requirements** 中确认内核支持情况，或执行 `su -c droidspaces check`。
