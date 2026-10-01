@@ -14,7 +14,7 @@
 | `boot-stock-rebuild.img` | 官方源码原样重编 | 已验证：正常开机 |
 | `boot-ksu-next.img` | + KernelSU-Next | 已刷入使用，反馈正常 |
 | `boot-ksu-droidspaces.img` | + Droidspaces（不含 `USER_NS`） | 已验证：正常开机；Droidspaces 检测仅 User namespaces 一项为黄色 |
-| `boot-ksu-droidspaces-userns.img` | + `CONFIG_USER_NS` | 已验证：正常开机 |
+| `boot-ksu-droidspaces-userns.img` | + `CONFIG_USER_NS` | 已验证：正常开机；Droidspaces 检测全部通过 |
 
 四个镜像的内核版本串都是 `5.4.302-qgki-g7ede20c8692e`，与官方一致。
 
