@@ -1,0 +1,6 @@
+id=venus_server
+name=Venus Server Tuning
+version=v1.3
+versionCode=4
+author=jocay
+description=Runs the Xiaomi 11 as an always-on server: no thermal throttling, performance CPU policy, no doze, low-latency Wi-Fi, charge limit, open adb on TCP 5555. Tunables in config.sh.

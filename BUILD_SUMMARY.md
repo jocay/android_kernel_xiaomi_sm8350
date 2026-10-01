@@ -15,8 +15,9 @@
 | `boot-ksu-next.img` | + KernelSU-Next | 已刷入使用，反馈正常 |
 | `boot-ksu-droidspaces.img` | + Droidspaces（不含 `USER_NS`） | 已验证：正常开机；Droidspaces 检测仅 User namespaces 一项为黄色 |
 | `boot-ksu-droidspaces-userns.img` | + `CONFIG_USER_NS` | 已验证：正常开机；Droidspaces 检测全部通过 |
+| `boot-ksu-droidspaces-server.img` | + BBR / fq_codel（`server_net.config`） | 已验证：正常开机；BBR 与 fq_codel 生效 |
 
-四个镜像的内核版本串都是 `5.4.302-qgki-g7ede20c8692e`，与官方一致。
+五个镜像的内核版本串都是 `5.4.302-qgki-g7ede20c8692e`，与官方一致。
 
 SHA-256：
 ```
@@ -24,6 +25,7 @@ a460971bae8f13b1228228ae57b9cde969df18bcb94c47dc0a9087609d76a171  boot-stock-reb
 2a047069ab16f85efb47b1a7e5fa7a568d71dd7740e300d00d2cbffd0800637d  boot-ksu-next.img
 225d4070a3d902a4c91b891825f530def462f769c4f833cc7440acf1f6cbcfb9  boot-ksu-droidspaces.img
 9a510a158a45de5944a7a7a89b5886d7af49129ab203631bc25a94b9194fab0e  boot-ksu-droidspaces-userns.img
+97f6a4d8ecd4f6e9c78026eda9d0abac4db521c2a8f2d612fdaee41f7f1f6026  boot-ksu-droidspaces-server.img
 a15d4138df0cea05774b4d53592121327d536c08707fe1fde374e377af2baf46  boot.img（官方，回滚用）
 ```
 
@@ -83,7 +85,10 @@ e808d6c6f Merge branch 'lineage-23.2' into lineage-23.2-ksu
 - 配置片段 `arch/arm64/configs/vendor/droidspaces.config`：`SYSVIPC`、`POSIX_MQUEUE`、`IPC_NS`、`PID_NS`、`USER_NS`、`DEVTMPFS`，以及 NAT / UFW / Fail2ban / NixOS 用到的 netfilter 与 tmpfs 选项。
 - `SYSVIPC`、`POSIX_MQUEUE` 新增的字段放进了 `task_struct`、`user_struct` 末尾的 `ANDROID_KABI_RESERVE` 槽位（`include/linux/sched.h`、`include/linux/sched/user.h`），原有字段偏移不变。
 
-相对官方配置，最终 `.config` 共多出 26 项：24 项来自上面两个片段及其依赖，2 项是主机探测项 `CC_CAN_LINK*`；没有任何官方选项被关闭或改值。除文档外，源码改动为 19 个文件、+437 / −99 行，其中 `build_boot.sh` 占大部分。
+以上两部分相对官方配置共多出 26 项：24 项来自两个片段及其依赖，2 项是主机探测项 `CC_CAN_LINK*`；没有任何官方选项被关闭或改值。第 4 点的网络片段另有增改，见下。除文档外，源码改动为 19 个文件、+437 / −99 行，其中 `build_boot.sh` 占大部分。
+
+### 4. 服务器化（内核部分）
+配置片段 `arch/arm64/configs/vendor/server_net.config`：TCP 拥塞控制默认改为 BBR（cubic 仍可切换），默认队列算法由 `pfifo_fast` 改为 fq_codel，同时内置 fq。`build_boot.sh` 默认合入。它把官方的 `DEFAULT_TCP_CONG="cubic"` 改成了 `"bbr"`，这是唯一一处改动官方选项取值的地方。
 
 ---
 
@@ -107,7 +112,39 @@ KernelSU 的挂钩点另外通过反汇编确认：各系统调用入口确实�
 
 ---
 
-## 六、如何复现
+## 六、服务器化（运行时部分）：`android/venus_server/`
+
+WiFi 驱动是 vendor 分区里的官方模块，温控由用户态服务决定，这些都不在 `boot.img` 里，所以做成了一个 KernelSU 模块，开机自动应用。可调项在 `config.sh`，开机日志在手机的 `/data/adb/modules/venus_server/boot.log`。
+
+| 项目 | 做法 | 真机结果 |
+|---|---|---|
+| 温控降频 | 停掉小米的 `mi_thermald` 并清除它留下的限制 | 大核 2112 → 2419 MHz，超大核 2150 → 2841 MHz，GPU 限制解除 |
+| CPU | 三个簇用 performance 调频，关闭深度空闲状态 | 生效 |
+| 防休眠 | 关闭 Doze，持有唤醒锁 | 生效 |
+| 充电上限 | LineageOS 充电控制，70%（系统只允许 70–100） | 生效 |
+| WiFi | 关闭省电、强制高性能和低延迟模式，每 30 秒检查一次 | 省电已关 |
+| TCP | BBR、fq_codel、加大缓冲、关闭空闲后慢启动、TFO | 生效（需本分支内核） |
+| 联网检测与 NTP | 检测地址换成国内可达的，NTP 换成 `ntp.aliyun.com` | WiFi 由“部分连接”变为已验证，NTP 同步成功 |
+| adb | 开机监听 TCP 5555，关闭授权 | 用另一台 adb 客户端（WSL 内，密钥不同）可直接连接，没有授权弹窗 |
+
+几点说明：
+
+- **降频全部来自 `mi_thermald`**：它在主板 15°C 时就已把大核和超大核限在硬件上限以下，39°C 起继续下压。
+- **内核温区默认保留**（`DISABLE_KERNEL_PASSIVE_TRIPS=0`）：它们只在主板 78°C 或结温 108°C 以上才动作，是这台机器上仅有的过热保护，正常运行时不影响性能。
+- **adb 免认证的代价**：能访问 5555 端口的人都能拿到 shell；Shell 在 KernelSU 里被授予 root 时，等同于拿到 root。只适合可信的局域网。
+- **停掉 `mi_thermald` 后**，它按温度分级限制充电电流的逻辑也随之失效，充电芯片自身的电池温度保护不受影响。
+- 模块 v1.0–v1.2 在真机上跑过；**v1.3（加入联网检测与 NTP 设置）尚未在真机上跑过开机流程**，其中的设置项本身已手动应用并验证。
+
+打包与安装：
+```bash
+android/venus_server/pack.sh /tmp
+adb push /tmp/venus_server-v1.3.zip /data/local/tmp/
+adb shell su -c "ksud module install /data/local/tmp/venus_server-v1.3.zip"   # 重启后生效
+```
+
+---
+
+## 七、如何复现
 
 ```bash
 git clone -b lineage-23.2-ksu --recurse-submodules https://github.com/jocay/android_kernel_xiaomi_sm8350.git
@@ -129,7 +166,7 @@ WSL2 里看不到手机，需要用 Windows 侧的 `fastboot`。
 
 ---
 
-## 七、注意事项
+## 八、注意事项
 
 - **`CONFIG_USER_NS` 的代价**：所有普通应用也能创建用户命名空间，Android 内核通常关闭它。它只为容器内运行 Docker 而开；不需要时删掉 `droidspaces.config` 最后一行重新编译。
 - **官方系统升级后**：如果新版官方内核换了提交号，需要同步源码并修改 `build_boot.sh` 里的 `SCMVERSION`，脚本检测到不一致会直接报错。全量 CRC 基线也要用新的原版构建重新生成（`EXTRA_CONFIGS= SAVE_ABI_BASELINE=1 ./build_boot.sh`）。
