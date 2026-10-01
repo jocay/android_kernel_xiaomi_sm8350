@@ -285,6 +285,6 @@ KernelSU 的 Kbuild 会在编译时向 `include/linux/seccomp.h` 的 `struct sec
 - **配置片段**：`arch/arm64/configs/vendor/droidspaces.config`，`build_boot.sh` 会自动合入。主要是 `SYSVIPC`、`POSIX_MQUEUE`、`IPC_NS`、`PID_NS`、`DEVTMPFS`，以及容器内 NAT / UFW / Fail2ban / NixOS 用到的 netfilter 与 tmpfs 选项。
 - **kABI 处理**：`SYSVIPC` 和 `POSIX_MQUEUE` 会分别给 `task_struct`、`user_struct` 增加字段。`include/linux/sched.h` 与 `include/linux/sched/user.h` 把这些字段放进结构体末尾预留的 `ANDROID_KABI_RESERVE` 槽位，原有字段的偏移不变。
 - **不要超出该片段的范围**：例如 `CGROUP_DEVICE`、`CGROUP_PIDS` 会改变 cgroup 相关结构体，破坏官方模块的 ABI。
-- **`CONFIG_USER_NS` 默认未开启**：它能消除容器内 Docker 的 “unsafe procfs” 报错，但会允许所有普通应用创建用户命名空间，Android 内核出于安全考虑一直关闭它。已验证开启后 ABI 不变，需要时取消片段末尾那一行的注释即可。
+- **`CONFIG_USER_NS` 已开启**：用于在容器内运行 Docker（消除其 “unsafe procfs” 报错），Droidspaces 本身不强制要求。代价是所有普通应用也能创建用户命名空间，Android 内核出于安全考虑通常关闭它。不需要 Docker 时可删掉片段末尾那一行。
 
 刷入后安装 Droidspaces 应用并授予 root，在 **设置 -> Requirements -> Check Requirements** 中确认内核支持情况，或执行 `su -c droidspaces check`。
