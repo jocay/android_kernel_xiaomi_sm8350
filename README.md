@@ -237,3 +237,31 @@ LineageOS 23.2（Android 16）官方整机构建使用的平台编译器是 `cla
 2. **提交与编译流程**：
    - 修改代码 -> `git add . && git commit -m "feat: your change"` -> 运行 `./build_boot.sh` -> 刷入测试。
    - 始终保持 Commit 状态进行构建，确保 vermagic 版本号稳定。
+
+---
+
+## 八、KernelSU-Next（本分支 `lineage-23.2-ksu`）
+
+本分支在 `lineage-23.2` 基础上内置了 [KernelSU-Next](https://github.com/KernelSU-Next/KernelSU-Next)（legacy 分支，手动挂钩模式）。
+
+### 1. 获取源码
+KernelSU-Next 以 submodule 形式放在 `KernelSU-Next/`，`drivers/kernelsu` 是指向它的软链接。它的版本号按自身仓库的提交数计算，**不能浅克隆**：
+```bash
+git clone -b lineage-23.2-ksu --recurse-submodules https://github.com/jocay/android_kernel_xiaomi_sm8350.git
+# 已克隆的仓库：
+git submodule update --init
+```
+
+### 2. 配置与编译
+在第四节的四个 defconfig 片段之后追加 `arch/arm64/configs/vendor/kernelsu_next.config`（`CONFIG_KSU=y`、`CONFIG_KSU_MANUAL_HOOK=y`）。不追加的话 `CONFIG_KSU` 仍默认开启，但会落到不适用于 5.4 的 kprobes 模式。
+
+本分支的 HEAD 不是官方提交，编译前需固定版本后缀，否则 vermagic 与 `vendor_boot` 中的官方模块不匹配（`build_boot.sh` 目前不会做这两步）：
+```bash
+echo "-g7ede20c8692e" > .scmversion
+```
+
+### 3. 不要给 `struct seccomp` 加字段
+KernelSU 的 Kbuild 会在编译时向 `include/linux/seccomp.h` 的 `struct seccomp` 插入 `atomic_t filter_count;`，这会改变 `task_struct` 布局并破坏官方模块的 ABI。该文件中的注释用于阻止这一行为，请勿删除。
+
+### 4. 使用
+刷入 `boot.img` 后安装同版本的 KernelSU-Next 管理器。开机时连按三次音量下键进入安全模式（禁用所有模块）。

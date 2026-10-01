@@ -25,6 +25,11 @@ struct seccomp_filter;
  *
  *          @filter must only be accessed from the context of current as there
  *          is no read locking.
+ *
+ * Do not add fields: this struct is embedded in task_struct, so growing it
+ * breaks the ABI of the prebuilt vendor modules. KernelSU's Kbuild inserts
+ * "atomic_t filter_count;" here unless it finds that text in this file; it
+ * only uses the field on v5.9+, so this comment is what keeps it away.
  */
 struct seccomp {
 	int mode;
