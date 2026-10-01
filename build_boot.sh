@@ -38,7 +38,7 @@ MKBOOTIMG_DIR="$TOOLS/boot/mkbootimg"
 AVB_DIR="$TOOLS/boot/avb"
 
 CONFIG_DIR="$ROOT_DIR/arch/arm64/configs/vendor"
-OPTIONAL_CONFIGS="kernelsu_next.config droidspaces.config"
+OPTIONAL_CONFIGS="kernelsu_next.config droidspaces.config server_net.config"
 
 OUT_DIR="$ROOT_DIR/out"
 KERNEL_OBJ="$OUT_DIR/kernel_obj"
