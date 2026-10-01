@@ -14,7 +14,7 @@
 | `boot-stock-rebuild.img` | 官方源码原样重编 | 已验证：正常开机 |
 | `boot-ksu-next.img` | + KernelSU-Next | 已刷入使用，反馈正常 |
 | `boot-ksu-droidspaces.img` | + Droidspaces（不含 `USER_NS`） | 已验证：正常开机；Droidspaces 检测仅 User namespaces 一项为黄色 |
-| `boot-ksu-droidspaces-userns.img` | + `CONFIG_USER_NS` | **尚未在真机验证** |
+| `boot-ksu-droidspaces-userns.img` | + `CONFIG_USER_NS` | 已验证：正常开机 |
 
 四个镜像的内核版本串都是 `5.4.302-qgki-g7ede20c8692e`，与官方一致。
 
@@ -131,7 +131,6 @@ WSL2 里看不到手机，需要用 Windows 侧的 `fastboot`。
 
 ## 七、注意事项
 
-- **`boot-ksu-droidspaces-userns.img` 尚未真机验证。** 它与已验证的上一个镜像只差 `CONFIG_USER_NS` 一项。
 - **`CONFIG_USER_NS` 的代价**：所有普通应用也能创建用户命名空间，Android 内核通常关闭它。它只为容器内运行 Docker 而开；不需要时删掉 `droidspaces.config` 最后一行重新编译。
 - **官方系统升级后**：如果新版官方内核换了提交号，需要同步源码并修改 `build_boot.sh` 里的 `SCMVERSION`，脚本检测到不一致会直接报错。全量 CRC 基线也要用新的原版构建重新生成（`EXTRA_CONFIGS= SAVE_ABI_BASELINE=1 ./build_boot.sh`）。
 - **ABI 检查的覆盖范围**：`vendor_boot` 之外的模块（WiFi、相机等）靠本地基线文件覆盖，这个文件不在仓库里；新克隆的环境需要先生成一次。
